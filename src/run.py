@@ -11,6 +11,16 @@ from ScSR import ScSR
 from backprojection import backprojection
 from sklearn.metrics import mean_squared_error 
 from sklearn.preprocessing import normalize
+import argparse
+
+parser = argparse.ArgumentParser(description='')
+
+parser.add_argument('--dict_prefix', help='path prefix to the trained dict')
+parser.add_argument('--val_hr', help='path to high resolution')
+parser.add_argument('--val_lr', help='path to low resolution')
+parser.add_argument('--result', help='path to result')
+
+args = parser.parse_args()
 
 def normalize_signal(img, channel):
     if np.mean(img[:, :, channel]) * 255 > np.mean(img_lr_ori[:, :, channel]):
@@ -40,19 +50,18 @@ patch_size= 3
 
 dict_name = str(D_size) + '_US' + str(US_mag) + '_L' + str(lmbd) + '_PS' + str(patch_size)
 
-prefix = ''
-# prefix = 'flower_'
+prefix = args.dict_prefix
 
-with open('data/dicts/' + prefix + 'Dh_' + dict_name + '.pkl', 'rb') as f:
+with open(prefix + 'Dh_' + dict_name + '.pkl', 'rb') as f:
     Dh = pickle.load(f)
 Dh = normalize(Dh)
-with open('data/dicts/' + prefix + 'Dl_' + dict_name + '.pkl', 'rb') as f:
+with open(prefix + 'Dl_' + dict_name + '.pkl', 'rb') as f:
     Dl = pickle.load(f)
 Dl = normalize(Dl)
 
 ### SET PARAMETERS
-img_lr_dir = 'data/val_lr/'
-img_hr_dir = 'data/val_hr/'
+img_lr_dir = args.val_lr + '/'
+img_hr_dir = args.val_hr + '/'
 overlap = 1
 lmbd = 0.1
 upscale = 3
@@ -68,14 +77,14 @@ for i in tqdm(range(len(img_lr_file))):
     img_name_dir = list(img_name)
     img_name_dir = np.delete(np.delete(np.delete(np.delete(img_name_dir, -1), -1), -1), -1)
     img_name_dir = ''.join(img_name_dir)
-    if isdir('data/results/' + dict_name + '_' + img_name_dir) == False:
-        new_dir = mkdir('{}{}'.format('data/results/' + dict_name + '_', img_name_dir))
+    if isdir(args.result + '/' + dict_name + '_' + img_name_dir) == False:
+        new_dir = mkdir('{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir))
     img_lr = imread('{}{}'.format(img_lr_dir, img_name))
 
     # Read and save ground truth image
     img_hr = imread('{}{}'.format(img_hr_dir, img_name))
     # imsave('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', '3HR.png'), img_hr, quality=100)
-    imsave('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', '3HR.png'), img_hr)
+    imsave('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', '3HR.png'), img_hr)
     img_hr_y = rgb2ycbcr(img_hr)[:, :, 0]
 
     # Change color space
@@ -92,23 +101,31 @@ for i in tqdm(range(len(img_lr_file))):
 
     # Super Resolution via Sparse Representation
     img_sr_y = ScSR(img_lr_y, img_hr_y.shape, upscale, Dh, Dl, lmbd, overlap)
-    img_sr_y = backprojection(img_sr_y, img_lr_y, maxIter)
+    img_sr_y2 = backprojection(img_sr_y, img_lr_y, maxIter)
 
     # Create colored SR images
     img_sr = np.stack((img_sr_y, img_sr_cb, img_sr_cr), axis=2)
     img_sr = ycbcr2rgb(img_sr)
 
+    img_sr2 = np.stack((img_sr_y2, img_sr_cb, img_sr_cr), axis=2)
+    img_sr2 = ycbcr2rgb(img_sr2)
+
     # Signal normalization
     for channel in range(img_sr.shape[2]):
         img_sr[:, :, channel] = normalize_signal(img_sr, channel)
 
+    for channel in range(img_sr2.shape[2]):
+        img_sr2[:, :, channel] = normalize_signal(img_sr2, channel)
+
     # Maximum pixel intensity normalization
     img_sr = normalize_max(img_sr)
+
+    img_sr2 = normalize_max(img_sr2)
 
     # Bicubic interpolation for reference
     img_bc = resize(img_lr_ori, (img_hr.shape[0], img_hr.shape[1]))
     # imsave('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', '1bicubic.png'), img_bc, quality=100)
-    imsave('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', '1bicubic.png'), img_bc)
+    imsave('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', '1bicubic.png'), img_bc)
     img_bc_y = rgb2ycbcr(img_bc)[:, :, 0]
 
     # Compute RMSE for the illuminance
@@ -116,8 +133,12 @@ for i in tqdm(range(len(img_lr_file))):
     rmse_bc_hr = np.zeros((1,)) + rmse_bc_hr
     rmse_sr_hr = np.sqrt(mean_squared_error(img_hr_y, img_sr_y))
     rmse_sr_hr = np.zeros((1,)) + rmse_sr_hr
-    np.savetxt('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', 'RMSE_bicubic.txt'), rmse_bc_hr)
-    np.savetxt('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', 'RMSE_SR.txt'), rmse_sr_hr)
+    rmse_sr_hr2 = np.sqrt(mean_squared_error(img_hr_y, img_sr_y2))
+    rmse_sr_hr2 = np.zeros((1,)) + rmse_sr_hr2
+    np.savetxt('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', 'RMSE_bicubic.txt'), rmse_bc_hr)
+    np.savetxt('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', 'RMSE_SR.txt'), rmse_sr_hr)
+    np.savetxt('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', 'RMSE_SR2.txt'), rmse_sr_hr2)
 
     # imsave('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', '2SR.png'), img_sr, quality=100)
-    imsave('{}{}{}{}'.format('data/results/' + dict_name + '_', img_name_dir, '/', '2SR.png'), img_sr)
+    imsave('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', '2SR.png'), img_sr)
+    imsave('{}{}{}{}'.format(args.result + '/' + dict_name + '_', img_name_dir, '/', '2SR2.png'), img_sr2)
